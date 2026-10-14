@@ -1,0 +1,11 @@
+# secrets (bot token) and per-user access
+.env*
+mcp.json
+access.json*
+
+# runtime state, queues, received files, logs
+bridge-state.json
+bridge-queue.json
+inbox/
+approved/
+*.log
