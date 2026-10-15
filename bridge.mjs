@@ -1506,6 +1506,44 @@ async function runJob(state, job) {
   }
 }
 
+// Outreach pings (sent by the Apps Script engine) carry buttons "oc|<op>|<lead_id>".
+// Forward the tap to the engine, then append the result to the ping and drop its buttons.
+const OUTREACH_CONFIG = process.env.OUTREACH_CONFIG || "C:/Projects/outreach/config.json"
+
+async function handleOutreachCallback(query, done) {
+  const [, op, leadId] = String(query.data).split("|")
+  let cfg
+  try {
+    cfg = JSON.parse(readFileSync(OUTREACH_CONFIG, "utf8"))
+  } catch {
+    await done("Outreach config not found on this computer.")
+    return
+  }
+  let result
+  try {
+    const res = await fetch(cfg.webapp_url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ secret: cfg.secret, action: "lead_action", op, lead_id: leadId }),
+    })
+    result = await res.json()
+  } catch (err) {
+    await done("Could not reach the outreach engine. Try again.")
+    return
+  }
+  const line = result.ok ? result.message : `Failed: ${result.error}`
+  await done(line)
+  const msg = query.message
+  if (result.ok && msg?.text) {
+    await tg("editMessageText", {
+      chat_id: msg.chat.id,
+      message_id: msg.message_id,
+      text: `${msg.text}\n\n→ ${line}`.slice(0, 4000),
+      link_preview_options: { is_disabled: true },
+    }).catch(() => {})
+  }
+}
+
 async function handleCallback(state, query) {
   const userId = String(query.from?.id || "")
   const data = String(query.data || "")
@@ -1514,6 +1552,10 @@ async function handleCallback(state, query) {
   const done = (text) => tg("answerCallbackQuery", text ? { callback_query_id: query.id, text: String(text).slice(0, 180) } : { callback_query_id: query.id }).catch(() => {})
   if (userId !== OWNER_ID || !chatId) {
     await done()
+    return
+  }
+  if (data.startsWith("oc|")) {
+    await handleOutreachCallback(query, done)
     return
   }
   const threadId = topicId(message)
